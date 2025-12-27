@@ -1,11 +1,8 @@
-📦 Copyparty + JuiceFS Install Script
-
-Save as:
-
-/opt/copyparty/install-copyparty.sh
+📁 Save as
+/opt/juicefs/install-juicefs-copyparty.sh
 
 
 Then:
 
-chmod +x install-copyparty.sh
-sudo ./install-copyparty.sh
+chmod +x install-juicefs-copyparty.sh <br>
+sudo ./install-juicefs-copyparty.sh
