@@ -1,3 +1,10 @@
+to rerun:
+systemctl daemon-reexec
+systemctl daemon-reload
+systemctl enable copyparty
+systemctl start copyparty
+
+
 📁 Save as
 /opt/juicefs/install-juicefs-copyparty.sh
 
