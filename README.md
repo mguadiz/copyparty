@@ -1,4 +1,4 @@
-to rerun:
+to rerun:<br>
 systemctl daemon-reexec <br>
 systemctl daemon-reload<br>
 systemctl enable copyparty<br>
