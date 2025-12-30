@@ -130,7 +130,7 @@ ExecStart=/usr/bin/python3 ${COPYPARTY_BIN} \\
   --hist ${COPYPARTY_HIST} \\
   --http2 \\
   --workers 8 \\
-  -v data:${JUICEFS_MOUNT}:rw,${COPYPARTY_USER}
+  -v data:${JUICEFS_MOUNT}:rwmda,${COPYPARTY_USER}
 
 Restart=always
 RestartSec=3
