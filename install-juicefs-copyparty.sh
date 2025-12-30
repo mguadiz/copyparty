@@ -7,12 +7,18 @@ set -euo pipefail
 REDIS_CONTAINER="juicefs-redis"
 REDIS_PORT=6379
 REDIS_DATA_DIR="/opt/juicefs/redis"
+JUICEFS_META="redis://127.0.0.1:6379/1"
 
 JUICEFS_NAME="juicefs"
 JUICEFS_MOUNT="/mnt/juicefs"
 JUICEFS_CACHE="/var/cache/juicefs"
 JUICEFS_CACHE_SIZE="100G"
-JUICEFS_META="redis://127.0.0.1:6379/1"
+
+# SeaweedFS S3
+S3_ENDPOINT="http://192.168.1.106:8888"
+S3_BUCKET="juicefs-media"
+S3_ACCESS_KEY="admin"
+S3_SECRET_KEY="admin"
 
 COPYPARTY_DIR="/opt/copyparty"
 COPYPARTY_BIN="${COPYPARTY_DIR}/copyparty-sfx.py"
@@ -32,7 +38,6 @@ fi
 ############################
 # BASE DEPS
 ############################
-echo "==> Installing base dependencies"
 apt update
 apt install -y \
   curl ca-certificates \
@@ -45,17 +50,14 @@ systemctl enable docker
 systemctl start docker
 
 ############################
-# DISABLE HOST REDIS (CRITICAL)
+# DISABLE HOST REDIS
 ############################
-echo "==> Disabling host Redis (prevents metadata split)"
 systemctl stop redis-server 2>/dev/null || true
 systemctl disable redis-server 2>/dev/null || true
 
 ############################
-# DOCKER REDIS (PERSISTENT)
+# DOCKER REDIS (METADATA)
 ############################
-echo "==> Ensuring Docker Redis for JuiceFS"
-
 mkdir -p "${REDIS_DATA_DIR}"
 
 if ! docker inspect "${REDIS_CONTAINER}" &>/dev/null; then
@@ -80,44 +82,34 @@ sleep 3
 # JUICEFS INSTALL
 ############################
 if ! command -v juicefs &>/dev/null; then
-  echo "==> Installing JuiceFS"
   curl -fsSL https://d.juicefs.com/install | sh
 fi
 
 mkdir -p "${JUICEFS_MOUNT}" "${JUICEFS_CACHE}"
 
 ############################
-# SAFE FORMAT (ONLY IF EMPTY)
+# FORMAT (S3 BACKEND)
 ############################
-echo "==> Checking JuiceFS metadata"
+echo "==> Formatting JuiceFS on SeaweedFS S3 (if needed)"
+
 if ! juicefs status "${JUICEFS_META}" &>/dev/null; then
-  echo "==> Formatting JuiceFS (new filesystem)"
-  mkdir -p /var/lib/juicefs-data
   juicefs format \
-    --storage file \
-    --bucket /var/lib/juicefs-data \
+    --storage s3 \
+    --bucket "${S3_ENDPOINT}/buckets/${S3_BUCKET}" \
+    --access-key "${S3_ACCESS_KEY}" \
+    --secret-key "${S3_SECRET_KEY}" \
     "${JUICEFS_META}" \
     "${JUICEFS_NAME}"
 else
-  echo "==> Existing JuiceFS metadata detected (no format)"
+  echo "==> Existing JuiceFS metadata detected — skipping format"
 fi
 
-### PERMISSIONS (OPTION B: limit writes to /data) ###
-echo "==> Setting JuiceFS permissions for Copyparty (Option B)"
-
-mkdir -p "${JUICEFS_MOUNT}/data"
-
-chown -R "${COPYPARTY_USER}:${COPYPARTY_USER}" "${JUICEFS_MOUNT}/data"
-chmod 755 "${JUICEFS_MOUNT}/data"
-
 ############################
-# SYSTEMD SERVICE (CORRECT)
+# SYSTEMD MOUNT
 ############################
-echo "==> Creating JuiceFS systemd service"
-
 cat > /etc/systemd/system/juicefs.service <<EOF
 [Unit]
-Description=JuiceFS Mount
+Description=JuiceFS Mount (SeaweedFS S3)
 After=network-online.target docker.service
 Wants=network-online.target
 
@@ -142,25 +134,22 @@ systemctl enable juicefs
 systemctl restart juicefs
 
 sleep 3
-
-if ! mountpoint -q "${JUICEFS_MOUNT}"; then
-  echo "ERROR: JuiceFS failed to mount"
-  exit 1
-fi
+mountpoint -q "${JUICEFS_MOUNT}"
 
 ############################
-# COPYPARTY SETUP
+# COPYPARTY USER
 ############################
-echo "==> Setting up Copyparty"
-
 if ! id "${COPYPARTY_USER}" &>/dev/null; then
   useradd -r -s /usr/sbin/nologin "${COPYPARTY_USER}"
 fi
 
 mkdir -p "${COPYPARTY_DIR}" "${COPYPARTY_HIST}"
 chown -R "${COPYPARTY_USER}:${COPYPARTY_USER}" \
-  "${COPYPARTY_DIR}" "${COPYPARTY_HIST}"
+  "${COPYPARTY_DIR}" "${COPYPARTY_HIST}" "${JUICEFS_MOUNT}"
 
+############################
+# COPYPARTY INSTALL
+############################
 if [[ ! -f "${COPYPARTY_BIN}" ]]; then
   curl -L \
     https://github.com/9001/copyparty/releases/latest/download/copyparty-sfx.py \
@@ -169,7 +158,7 @@ if [[ ! -f "${COPYPARTY_BIN}" ]]; then
 fi
 
 ############################
-# COPYPARTY SYSTEMD
+# COPYPARTY SERVICE
 ############################
 cat > /etc/systemd/system/copyparty.service <<EOF
 [Unit]
@@ -209,14 +198,6 @@ systemctl restart copyparty
 ############################
 # DONE
 ############################
-echo ""
-echo "✅ Recovery complete — architecture restored"
-echo ""
-echo "JuiceFS mount: ${JUICEFS_MOUNT}"
-echo "Copyparty URL: https://<host>:${COPYPARTY_PORT}"
-echo "User: ${COPYPARTY_USER}"
-echo "Pass: ${COPYPARTY_PASS}"
-echo ""
-echo "Logs:"
-echo "  journalctl -u juicefs -f"
-echo "  journalctl -u copyparty -f"
+echo "✅ JuiceFS now backed by SeaweedFS S3"
+echo "SeaweedFS dashboards should show IO immediately"
+echo "Copyparty: http://<host>:${COPYPARTY_PORT}"
